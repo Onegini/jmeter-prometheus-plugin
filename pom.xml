@@ -7,6 +7,11 @@
 	<name>Jmeter-Prometheus Listener Plugin</name>
 	<description>A Jmeter plugin that creates a Prometheus endpoint of results.</description>
 
+	<parent>
+		<groupId>com.onegini</groupId>
+		<artifactId>og-parent</artifactId>
+		<version>19</version>
+	</parent>
 
 	<properties>
 		<prometheus.version>0.0.21</prometheus.version>
