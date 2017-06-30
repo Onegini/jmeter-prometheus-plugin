@@ -70,6 +70,7 @@ public class PrometheusListener extends AbstractListenerElement
   private Summary samplerCollector;
   private CollectorConfig samplerConfig = new CollectorConfig();
   private boolean collectSamples = true;
+  private final String SCRIPT_SAMPLE_PREFIX = "[SCRIPT]";
 
   // Thread counter
   private Gauge threadCollector;
@@ -110,7 +111,11 @@ public class PrometheusListener extends AbstractListenerElement
 
       // build the label values from the event and observe the sampler
       // metrics
-      String[] samplerLabelValues = this.labelValues(event);
+      final String[] samplerLabelValues = this.labelValues(event);
+      final String samplerNameLabelValue = samplerLabelValues[0];
+      if(samplerNameLabelValue.startsWith(SCRIPT_SAMPLE_PREFIX)){
+        return;
+      }
       if (collectSamples) {
         samplerCollector.labels(samplerLabelValues).observe(event.getResult().getTime());
       }
