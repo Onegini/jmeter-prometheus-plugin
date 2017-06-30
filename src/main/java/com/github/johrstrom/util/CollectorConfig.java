@@ -24,7 +24,9 @@ public class CollectorConfig {
 	public static final String SUCCESS_LABEL = "success";
 	public static final String FAILURE_LABEL = "failure";
 	public static final String CODE_LABEL = "code";
-	
+	public static final String NUMBER_OF_USERS = "number_of_users";
+	public static final String GET_THREAD_NAME_METHOD_NAME = "getThreadName";
+
 	/**
 	 * Get all the labels for this Collector.
 	 * 
@@ -117,6 +119,17 @@ public class CollectorConfig {
 	public void saveSamlerCode() throws NoSuchMethodException, SecurityException {
 		this.addLabel(CODE_LABEL);
 		this.addGetterMethod(SampleResult.class.getMethod("getResponseCode"));
+	}
+
+	/**
+	 * Convenience method for exposing sampler thread name. The thread name contains number of users (threads).
+	 *
+	 * @throws NoSuchMethodException
+	 * @throws SecurityException
+	 */
+	public void saveThreadName() throws NoSuchMethodException, SecurityException {
+		this.addLabel(NUMBER_OF_USERS);
+		this.addGetterMethod(SampleResult.class.getMethod(GET_THREAD_NAME_METHOD_NAME));
 	}
 	
 	/**
