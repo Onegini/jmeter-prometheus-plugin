@@ -71,6 +71,7 @@ public class PrometheusListener extends AbstractListenerElement
   private CollectorConfig samplerConfig = new CollectorConfig();
   private boolean collectSamples = true;
   private final String SCRIPT_SAMPLE_PREFIX = "[SCRIPT]";
+  private final String DEBUG_SAMPLE_PREFIX = "Debug Sampler";
 
   // Thread counter
   private Gauge threadCollector;
@@ -113,7 +114,7 @@ public class PrometheusListener extends AbstractListenerElement
       // metrics
       final String[] samplerLabelValues = this.labelValues(event);
       final String samplerNameLabelValue = samplerLabelValues[0];
-      if(samplerNameLabelValue.startsWith(SCRIPT_SAMPLE_PREFIX)){
+      if (notPerformanceIndicativeSample(samplerNameLabelValue)) {
         return;
       }
       if (collectSamples) {
@@ -137,6 +138,10 @@ public class PrometheusListener extends AbstractListenerElement
     } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
       log.error("Didn't update metric because of exception. Message was: {}", e.getMessage());
     }
+  }
+
+  private boolean notPerformanceIndicativeSample(final String samplerNameLabelValue) {
+    return samplerNameLabelValue.startsWith(SCRIPT_SAMPLE_PREFIX) || samplerNameLabelValue.startsWith(DEBUG_SAMPLE_PREFIX);
   }
 
   /*
