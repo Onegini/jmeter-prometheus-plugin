@@ -18,6 +18,7 @@
  */
 package com.github.johrstrom.listener;
 
+import static com.github.johrstrom.util.CollectorConfig.GET_SAMPLE_LABEL_METHOD_NAME;
 import static com.github.johrstrom.util.CollectorConfig.GET_THREAD_NAME_METHOD_NAME;
 
 import java.io.Serializable;
@@ -72,6 +73,7 @@ public class PrometheusListener extends AbstractListenerElement
   private boolean collectSamples = true;
   private final String SCRIPT_SAMPLE_PREFIX = "[SCRIPT]";
   private final String DEBUG_SAMPLE_PREFIX = "Debug Sampler";
+  private final String HELPER_SAMPLE_PREFIX = "HELPER";
 
   // Thread counter
   private Gauge threadCollector;
@@ -141,7 +143,9 @@ public class PrometheusListener extends AbstractListenerElement
   }
 
   private boolean notPerformanceIndicativeSample(final String samplerNameLabelValue) {
-    return samplerNameLabelValue.startsWith(SCRIPT_SAMPLE_PREFIX) || samplerNameLabelValue.startsWith(DEBUG_SAMPLE_PREFIX);
+    return samplerNameLabelValue.startsWith(SCRIPT_SAMPLE_PREFIX)
+        || samplerNameLabelValue.startsWith(DEBUG_SAMPLE_PREFIX)
+        || samplerNameLabelValue.startsWith(HELPER_SAMPLE_PREFIX);
   }
 
   /*
@@ -255,19 +259,39 @@ public class PrometheusListener extends AbstractListenerElement
 
     String[] values = new String[this.samplerConfig.getLabels().length];
 
-    for (int i = 0; i < values.length; i++) {
+    // last value (category label) is set in setSamplerNameAndCategory method along with sampler name
+    for (int i = 0; i < values.length - 1; i++) {
       Method m = this.samplerConfig.getMethods()[i];
       final String invokeMethodResult = m.invoke(event.getResult()).toString();
       if (m.getName().equals(GET_THREAD_NAME_METHOD_NAME)) {
-        final String[] threadNameParts = invokeMethodResult.split("/");
-        values[i] = threadNameParts[0].substring(1);
+        setNumberOfUsers(values, i, invokeMethodResult);
+      } else if (m.getName().equals(GET_SAMPLE_LABEL_METHOD_NAME)) {
+        setSamplerNameAndCategory(values, i, invokeMethodResult);
       } else {
         values[i] = invokeMethodResult;
       }
     }
 
     return values;
+  }
 
+  private void setNumberOfUsers(final String[] values, final int i, final String invokeMethodResult) {
+    final String[] threadNameParts = invokeMethodResult.split("/", 2);
+    values[i] = threadNameParts[0].substring(1);
+  }
+
+  private void setSamplerNameAndCategory(final String[] values, final int i, final String invokeMethodResult) {
+    final String[] samplerNameLabelParts = invokeMethodResult.split("] ", 2);
+    if(samplerNameLabelParts.length == 1){
+      //set sampler name
+      values[i] = samplerNameLabelParts[0];
+      //category not defined
+      values[values.length - 1] = "TODO";
+    }
+    //set sampler name
+    values[i] = samplerNameLabelParts[1];
+    //set category
+    values[values.length - 1] = samplerNameLabelParts[0].substring(1);
   }
 
   /**
@@ -366,6 +390,7 @@ public class PrometheusListener extends AbstractListenerElement
 
     if (saveConfig.saveLabel()) {
       collectorConfig.saveSamplerLabel();
+      collectorConfig.saveCategoryLabel();
     }
 
     if (saveConfig.saveCode()) {

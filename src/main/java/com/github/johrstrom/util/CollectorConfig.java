@@ -20,12 +20,14 @@ public class CollectorConfig {
 	private Method[] methods = new Method[]{};
 	
 	public static final String SAMPLER_NAME_LABEL = "sampler_name";
+	public static final String CATEGORY_LABEL = "category";
 	public static final String ASSERTION_NAME_LABEL = "assertion_name";
 	public static final String SUCCESS_LABEL = "success";
 	public static final String FAILURE_LABEL = "failure";
 	public static final String CODE_LABEL = "code";
 	public static final String NUMBER_OF_USERS = "number_of_users";
 	public static final String GET_THREAD_NAME_METHOD_NAME = "getThreadName";
+	public static final String GET_SAMPLE_LABEL_METHOD_NAME = "getSampleLabel";
 
 	/**
 	 * Get all the labels for this Collector.
@@ -96,7 +98,18 @@ public class CollectorConfig {
 	 */
 	public void saveSamplerLabel() throws NoSuchMethodException, SecurityException {
 		this.addLabel(SAMPLER_NAME_LABEL);
-		this.addGetterMethod(SampleResult.class.getMethod("getSampleLabel"));
+		this.addGetterMethod(SampleResult.class.getMethod(GET_SAMPLE_LABEL_METHOD_NAME));
+	}
+
+	/**
+	 * Convenience method for exposing sampler category.
+	 *
+	 * @throws NoSuchMethodException
+	 * @throws SecurityException
+	 */
+	public void saveCategoryLabel() throws NoSuchMethodException, SecurityException {
+		this.addLabel(CATEGORY_LABEL);
+		this.addGetterMethod(SampleResult.class.getMethod(GET_SAMPLE_LABEL_METHOD_NAME));
 	}
 
 	/**
