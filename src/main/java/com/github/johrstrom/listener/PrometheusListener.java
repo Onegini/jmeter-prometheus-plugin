@@ -25,12 +25,12 @@ import java.lang.reflect.Method;
 import org.apache.jmeter.assertions.AssertionResult;
 import org.apache.jmeter.engine.util.NoThreadClone;
 import org.apache.jmeter.reporters.AbstractListenerElement;
-import org.apache.jmeter.samplers.Remoteable;
 import org.apache.jmeter.samplers.SampleEvent;
 import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.testelement.TestStateListener;
 import org.apache.jmeter.testelement.property.ObjectProperty;
 import org.apache.jmeter.threads.JMeterContextService;
+import org.apache.jorphan.util.JMeterError;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -39,7 +39,9 @@ import org.slf4j.LoggerFactory;
 
 import com.github.johrstrom.util.CollectorConfig;
 
+import io.prometheus.client.Collector;
 import io.prometheus.client.CollectorRegistry;
+import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.Summary;
 import io.prometheus.client.exporter.MetricsServlet;
@@ -56,7 +58,7 @@ import io.prometheus.client.exporter.MetricsServlet;
  *
  */
 public class PrometheusListener extends AbstractListenerElement
-		implements SampleListener, Serializable, TestStateListener, Remoteable, NoThreadClone {
+		implements SampleListener, Serializable, TestStateListener, NoThreadClone {
 
 	public static final String SAVE_CONFIG = "johrstrom.save_config";
 
@@ -64,19 +66,19 @@ public class PrometheusListener extends AbstractListenerElement
 
 	private static final Logger log = LoggerFactory.getLogger(PrometheusListener.class);
 
-	private Server server;
+	private transient Server server;
 
 	// Samplers
-	private Summary samplerCollector;
+	private transient Summary samplerCollector;
 	private CollectorConfig samplerConfig = new CollectorConfig();
 	private boolean collectSamples = true;
 
 	// Thread counter
-	private Gauge threadCollector;
+	private transient Gauge threadCollector;
 	private boolean collectThreads = true;
 
 	// Assertions
-	private Summary assertionsCollector;
+	private transient Collector assertionsCollector;
 	private CollectorConfig assertionConfig = new CollectorConfig();
 	private boolean collectAssertions = true;
 
@@ -123,12 +125,16 @@ public class PrometheusListener extends AbstractListenerElement
 				if (event.getResult().getAssertionResults().length > 0) {
 					for (AssertionResult assertionResult : event.getResult().getAssertionResults()) {
 						String[] assertionsLabelValues = this.labelValues(event, assertionResult);
-						assertionsCollector.labels(assertionsLabelValues).observe(event.getResult().getTime());
+						
+						if(assertionsCollector instanceof Summary)
+							((Summary) assertionsCollector).labels(assertionsLabelValues).observe(event.getResult().getTime());
+						else if (assertionsCollector instanceof Counter)
+							((Counter) assertionsCollector).labels(assertionsLabelValues).inc();
 					}
 				}
 			}
 
-		} catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+		} catch (Exception e) {
 			log.error("Didn't update metric because of exception. Message was: {}", e.getMessage());
 		}
 	}
@@ -249,12 +255,22 @@ public class PrometheusListener extends AbstractListenerElement
 	 */
 	protected String[] labelValues(SampleEvent event)
 			throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+		
+		int configLabelLength = this.samplerConfig.getLabels().length;
+		int sampleVariableLength = SampleEvent.getVarCount();
+		int combinedLength = configLabelLength + sampleVariableLength;
+		
+		String[] values = new String[combinedLength];
+		int valuesIndex = -1;	//start at -1 so you can ++ when referencing it
 
-		String[] values = new String[this.samplerConfig.getLabels().length];
-
-		for (int i = 0; i < values.length; i++) {
+		for (int i = 0; i < configLabelLength; i++) {
 			Method m = this.samplerConfig.getMethods()[i];
-			values[i] = m.invoke(event.getResult()).toString();
+			values[++valuesIndex] = m.invoke(event.getResult()).toString();
+		}
+		
+		for(int i = 0; i < sampleVariableLength; i++) {
+			String varValue =  event.getVarValue(i);
+			values[++valuesIndex] = (varValue == null) ?  "" : varValue;
 		}
 
 		return values;
@@ -325,18 +341,14 @@ public class PrometheusListener extends AbstractListenerElement
 		this.samplerConfig = tmpSamplerConfig;
 
 		// register new collectors
-		if (collectSamples)
-			this.samplerCollector = Summary.build().name("jmeter_samples_latency").help("Summary for Sample Latency")
-					.labelNames(this.samplerConfig.getLabels()).quantile(0.5, 0.1).quantile(0.99, 0.1).create()
-					.register(CollectorRegistry.defaultRegistry);
+		this.createSamplerCollector();
+		this.createAssertionCollector();
 
 		if (collectThreads)
 			this.threadCollector = Gauge.build().name("jmeter_running_threads").help("Counter for running threds")
 					.create().register(CollectorRegistry.defaultRegistry);
 
-		if (collectAssertions)
-			this.assertionsCollector = Summary.build().name("jmeter_assertions_total").help("Counter for assertions")
-					.labelNames(this.assertionConfig.getLabels()).create().register(CollectorRegistry.defaultRegistry);
+		
 
 		log.info("Reconfigure complete.");
 
@@ -395,5 +407,64 @@ public class PrometheusListener extends AbstractListenerElement
 
 		return collectorConfig;
 	}
+	
+	
+	protected void createAssertionCollector(){
+		if (collectAssertions){
+			if(this.getSaveConfig().getAssertionClass().equals(Summary.class))
+				this.assertionsCollector = Summary.build().name("jmeter_assertions_total").help("Counter for assertions")
+					.labelNames(this.assertionConfig.getLabels()).quantile(0.5, 0.1).quantile(0.99, 0.1)
+					.create().register(CollectorRegistry.defaultRegistry);
+			
+			else if(this.getSaveConfig().getAssertionClass().equals(Counter.class))
+				this.assertionsCollector = Counter.build().name("jmeter_assertions_total").help("Counter for assertions")
+				.labelNames(this.assertionConfig.getLabels()).create().register(CollectorRegistry.defaultRegistry);
+			
+		}
+	}
 
+	
+	protected void createSamplerCollector(){
+		if (collectSamples) {
+			String[] labelNames = new String[]{};
+			
+			if (SampleEvent.getVarCount() > 0) {
+				labelNames = this.combineConfigLabelsWithSampleVars();
+			}else {
+				labelNames = this.samplerConfig.getLabels();
+			}
+			
+			this.samplerCollector = Summary.build()
+					.name("jmeter_samples_latency")
+					.help("Summary for Sample Latency")
+					.labelNames(labelNames)
+					.quantile(0.5, 0.1)
+					.quantile(0.99, 0.1)
+					.create()
+					.register(CollectorRegistry.defaultRegistry);
+		}
+	}
+	
+	private String[] combineConfigLabelsWithSampleVars() {
+		int configLabelLength = this.samplerConfig.getLabels().length;
+		int sampleVariableLength = SampleEvent.getVarCount();
+		int combinedLength = configLabelLength + sampleVariableLength;
+		
+		String[] returnArray = new String[combinedLength];
+		int returnArrayIndex = -1;	//start at -1 so you can ++ when referencing it
+		
+		//add config first
+		String[] configuredLabels = this.samplerConfig.getLabels();
+		for (int i = 0; i < configLabelLength; i++) {
+			returnArray[++returnArrayIndex] = configuredLabels[i];
+		}
+		
+		//now add sample variables
+		for (int i = 0; i < sampleVariableLength; i++) {
+			returnArray[++returnArrayIndex] = SampleEvent.getVarName(i);
+		}
+		
+		return returnArray;
+	}
+	
 }
